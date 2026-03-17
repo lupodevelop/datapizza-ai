@@ -303,11 +303,8 @@ class PgVectorVectorstore(Vectorstore):
 
         table = self._qualified_table(collection_name)
 
-        # Persist config locally for name inference
-        self._collections[collection_name] = vector_config
-
-        # Persist config to the metadata table so we can rebuild the cache later
-        meta = [
+        # Build a normalized schema description for the provided config.
+        requested_meta = [
             {
                 "name": cfg.name,
                 "dimensions": cfg.dimensions,
@@ -316,7 +313,21 @@ class PgVectorVectorstore(Vectorstore):
             }
             for cfg in vector_config
         ]
-        self._write_meta_config(collection_name, meta)
+
+        # If the collection was already created, ensure the requested schema matches.
+        existing_meta = self._read_meta_config(collection_name)
+        if existing_meta is not None:
+            if existing_meta != requested_meta:
+                raise ValueError(
+                    f"Collection '{collection_name}' already exists with a different vector schema. "
+                    "Call drop_collection() first if you want to recreate it."
+                )
+            # Cache the existing config for name inference.
+            self._collections[collection_name] = [VectorConfig(**m) for m in existing_meta]
+            return
+
+        # Cache the requested config for name inference.
+        self._collections[collection_name] = vector_config
 
         # Build schema
         cols = [
@@ -340,6 +351,30 @@ class PgVectorVectorstore(Vectorstore):
             with conn.cursor() as cur:
                 self._execute(cur, f"CREATE SCHEMA IF NOT EXISTS \"{self.schema}\";")
                 self._execute(cur, f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(cols)});")
+
+        # Validate that the created table matches the requested config if possible.
+        # This is best-effort: some pgvector / Postgres versions may not expose the
+        # vector type metadata in a way we can reliably introspect.
+        actual_config = self._load_collection_config_from_db(collection_name)
+        if actual_config is None:
+            log.warning(
+                "Unable to introspect collection '%s' after creation; continuing without schema verification.",
+                collection_name,
+            )
+        else:
+            def _schema_key(cfg: VectorConfig) -> tuple[str | None, int | None]:
+                return (cfg.name, cfg.dimensions)
+
+            requested_keys = {_schema_key(c) for c in vector_config}
+            actual_keys = {_schema_key(c) for c in actual_config}
+            if requested_keys != actual_keys:
+                raise ValueError(
+                    f"Collection '{collection_name}' exists with a different schema: "
+                    f"requested={requested_keys} actual={actual_keys}"
+                )
+
+        # Persist config to the metadata table for faster subsequent loads.
+        self._write_meta_config(collection_name, requested_meta)
 
         if create_index:
             self.create_index(
@@ -727,7 +762,7 @@ class PgVectorVectorstore(Vectorstore):
         self,
         collection_name: str,
         payload: dict,
-        points: list[str],
+        points: list[str | int],
         filters: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):

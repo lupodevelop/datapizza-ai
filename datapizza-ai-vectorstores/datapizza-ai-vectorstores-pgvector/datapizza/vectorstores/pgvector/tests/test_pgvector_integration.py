@@ -51,6 +51,22 @@ def test_pgvector_collection_add_search(pgvector_postgres):
 
 
 @pytest.mark.integration
+def test_pgvector_collection_create_collection_schema_mismatch_raises(pgvector_postgres):
+    store = PgVectorVectorstore(dsn=pgvector_postgres)
+
+    store.create_collection(
+        "test_collection_mismatch",
+        vector_config=[VectorConfig(name="embedding", dimensions=4)],
+    )
+
+    with pytest.raises(ValueError):
+        store.create_collection(
+            "test_collection_mismatch",
+            vector_config=[VectorConfig(name="embedding", dimensions=8)],
+        )
+
+
+@pytest.mark.integration
 def test_pgvector_collection_pooling_option(pgvector_postgres):
     pytest.importorskip("psycopg_pool")
 
