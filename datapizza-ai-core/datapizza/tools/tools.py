@@ -23,7 +23,7 @@ class Tool:
         end: bool = False,
         properties: dict[str, dict[str, Any]] | None = None,
         required: list[str] | None = None,
-        strict: bool = False,
+        strict: bool = True,
     ):
         """
         Args:
@@ -43,7 +43,7 @@ class Tool:
         self.strict: bool = strict
         self.description: str | None = description or (func.__doc__ if func else None)
 
-        if func and (not properties or not required):
+        if func and not properties:
             self.required = get_required_params(inspect.signature(self.func))  # type: ignore
             param_annotations = get_param_annotations(inspect.signature(self.func))  # type: ignore
             default_values = get_default_values(inspect.signature(self.func))  # type: ignore
@@ -52,7 +52,7 @@ class Tool:
             )
         else:
             self.properties = properties
-            self.required = required
+            self.required = required or []
 
         self.schema = self._get_function_schema()
 
@@ -117,7 +117,7 @@ class Tool:
         }
 
 
-def tool(func=None, name=None, description=None, end=False, strict=False):
+def tool(func=None, name=None, description=None, end=False, strict=True):
     """
     Decorator to wrap a function in a DecoratedFunc instance.
 

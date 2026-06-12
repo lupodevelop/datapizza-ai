@@ -7,6 +7,20 @@ from functools import wraps
 log = logging.getLogger(__name__)
 
 
+def _cache_hit_value(cached_result: object) -> object:
+    from datapizza.core.clients.models import ClientResponse, TokenUsage
+
+    if not isinstance(cached_result, ClientResponse):
+        return cached_result
+
+    return ClientResponse(
+        content=list(cached_result.content),
+        delta=cached_result.delta,
+        stop_reason=cached_result.stop_reason,
+        usage=TokenUsage(),
+    )
+
+
 class Cache(ABC):
     """
     This is the abstract base class for all cache implementations.
@@ -71,7 +85,7 @@ def cacheable(key_func: Callable):
                 cached_result = self.cache.get(cache_key)
                 if cached_result is not None:
                     log.info(f"Cache hit for {cache_key}")
-                    return cached_result
+                    return _cache_hit_value(cached_result)
 
             except Exception as e:
                 log.warning(f"Error generating cache key for {func.__name__}: {e}")
